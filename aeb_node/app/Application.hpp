@@ -21,6 +21,7 @@
 #ifndef AEB_APP_APPLICATION_HPP
 #define AEB_APP_APPLICATION_HPP
 
+#include <cstdint>
 #include <memory>
 
 #include "app/Options.hpp"
@@ -82,7 +83,7 @@ private:
     [[nodiscard]] int supervise(const SignalWaiter& signals);
 
     /** @brief Print one line of acquisition and streaming health. */
-    void reportHealth() const;
+    void reportHealth();
 
     /** @brief Stop and destroy components in reverse construction order. */
     void shutdown() noexcept;
@@ -95,6 +96,14 @@ private:
 
     /** @brief Acquisition driver; null until started. */
     std::unique_ptr<Lidar> lidar_;
+
+    /**
+     * @brief Read-error count at the previous health report.
+     *
+     * Lets @ref reportHealth distinguish a fault happening *now* from one that
+     * happened once at start-up, instead of repeating a stale message forever.
+     */
+    std::uint64_t reported_read_errors_{0U};
 };
 
 }  // namespace aeb::app

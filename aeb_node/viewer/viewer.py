@@ -136,15 +136,31 @@ class ScanRenderer:
         self._axes.set_title("AEB scan viewer - starting", fontsize=10)
         self._axes.grid(True, alpha=0.3)
 
+        # Disable autoscaling so that toolbar zoom and pan are preserved across
+        # animation ticks. Without this, every _update call resets the view.
+        self._axes.set_autoscaley_on(False)
+        self._axes.set_autoscalex_on(False)
+
         self._scatter = self._axes.scatter([], [], s=2.0, c=[], cmap="viridis",
                                            vmin=0, vmax=255)
+
+        # Press 'r' to reset the view to the full range.
+        self._figure.canvas.mpl_connect("key_press_event", self._on_key_press)
 
     def run(self, interval_ms: int) -> None:
         """Show the window and refresh until the user closes it."""
         # FuncAnimation must be kept referenced or the GUI loop discards it.
         self._animation = FuncAnimation(self._figure, self._update, interval=interval_ms,
                                         blit=False, cache_frame_data=False)
+        print("viewer: toolbar zoom/pan enabled, press 'r' to reset view")
         plt.show()
+
+    def _on_key_press(self, event) -> None:
+        """Handle keyboard shortcuts."""
+        if event.key == "r":
+            self._axes.set_ylim(0.0, self._max_range_mm)
+            self._axes.set_xlim(0.0, 2.0 * np.pi)
+            self._figure.canvas.draw_idle()
 
     def _update(self, _tick: int):
         """Redraw from the newest available frame."""
@@ -161,6 +177,8 @@ class ScanRenderer:
 
         self._scatter.set_offsets(np.column_stack((angles_rad, distances)))
         self._scatter.set_array(frame.qualities[keep])
+        # Only set the title text; do NOT touch axis limits, so that any
+        # toolbar zoom or pan the user applied is preserved.
         self._axes.set_title(self._status(frame, connected, total, int(distances.size)),
                              fontsize=10)
         return (self._scatter,)

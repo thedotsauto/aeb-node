@@ -128,7 +128,7 @@ int Application::supervise(const SignalWaiter& signals)
     }
 }
 
-void Application::reportHealth() const
+void Application::reportHealth()
 {
     const LidarStats lidar_stats = lidar_->stats();
 
@@ -145,13 +145,15 @@ void Application::reportHealth() const
                   << " bytes=" << net_stats.bytes_sent;
     }
 
-    // Counters alone cannot explain a fault. When acquisition is failing, the
-    // driver's own description is the only thing that identifies the cause, so
-    // it belongs in the routine health line rather than only in the fatal path.
-    if (lidar_stats.read_errors != 0U) {
+    // Report the driver's own description only for errors that occurred since
+    // the previous tick. Repeating a start-up timeout for the life of the
+    // process would make a healthy node look permanently faulty.
+    const std::uint64_t new_errors = lidar_stats.read_errors - reported_read_errors_;
+    reported_read_errors_ = lidar_stats.read_errors;
+    if (new_errors != 0U) {
         const std::string error = lidar_->lastError();
         if (!error.empty()) {
-            std::cout << "\n  last error: " << error;
+            std::cout << "\n  " << new_errors << " new error(s), last: " << error;
         }
     }
     std::cout << std::endl;
