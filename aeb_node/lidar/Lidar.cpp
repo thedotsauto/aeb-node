@@ -22,6 +22,20 @@
 #include "lidar/RpLidarDevice.hpp"
 
 namespace aeb {
+namespace {
+
+/**
+ * @brief Consecutive failed revolutions tolerated before reconnecting.
+ *
+ * A single timeout is normal and must not trigger a reconnect: the first
+ * revolution after @c startScan routinely times out while the motor reaches
+ * speed, and tearing the link down at that moment guarantees the driver never
+ * gets past spin-up. Only a sustained run of failures indicates a genuinely
+ * lost device.
+ */
+constexpr unsigned kMaxConsecutiveGrabFailures = 5U;
+
+}  // namespace
 
 /**
  * @brief Private state of a @ref Lidar instance.
@@ -198,8 +212,11 @@ struct Lidar::Impl {
      */
     void run()
     {
+        unsigned consecutive_failures = 0U;
+
         while (!stop_requested.load(std::memory_order_acquire)) {
             if (acquireOnce()) {
+                consecutive_failures = 0U;
                 continue;
             }
 
@@ -207,6 +224,14 @@ struct Lidar::Impl {
                 const std::lock_guard<std::mutex> lock(state_mutex);
                 ++stats.read_errors;
             }
+
+            // Retry on the existing connection first; only a sustained run of
+            // failures justifies discarding a link that is otherwise alive.
+            if (++consecutive_failures < kMaxConsecutiveGrabFailures) {
+                continue;
+            }
+            consecutive_failures = 0U;
+
             {
                 const std::lock_guard<std::mutex> lock(device_mutex);
                 device.close();

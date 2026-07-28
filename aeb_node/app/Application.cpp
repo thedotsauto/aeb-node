@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <iostream>
+#include <string>
 #include <utility>
 
 namespace aeb::app {
@@ -142,6 +143,16 @@ void Application::reportHealth() const
                   << " sent=" << net_stats.frames_sent
                   << " dropped=" << net_stats.frames_dropped
                   << " bytes=" << net_stats.bytes_sent;
+    }
+
+    // Counters alone cannot explain a fault. When acquisition is failing, the
+    // driver's own description is the only thing that identifies the cause, so
+    // it belongs in the routine health line rather than only in the fatal path.
+    if (lidar_stats.read_errors != 0U) {
+        const std::string error = lidar_->lastError();
+        if (!error.empty()) {
+            std::cout << "\n  last error: " << error;
+        }
     }
     std::cout << std::endl;
 }
