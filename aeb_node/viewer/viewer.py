@@ -144,16 +144,62 @@ class ScanRenderer:
         self._scatter = self._axes.scatter([], [], s=2.0, c=[], cmap="viridis",
                                            vmin=0, vmax=255)
 
-        # Press 'r' to reset the view to the full range.
-        self._figure.canvas.mpl_connect("key_press_event", self._on_key_press)
+        # Trackpad-friendly interaction: scroll to zoom, drag to pan,
+        # 'r' to reset. The matplotlib toolbar zoom requires a drag-box which
+        # is awkward on a trackpad; scroll-zoom is the natural gesture.
+        canvas = self._figure.canvas
+        canvas.mpl_connect("scroll_event", self._on_scroll)
+        canvas.mpl_connect("button_press_event", self._on_press)
+        canvas.mpl_connect("motion_notify_event", self._on_drag)
+        canvas.mpl_connect("button_release_event", self._on_release)
+        canvas.mpl_connect("key_press_event", self._on_key_press)
+        self._panning = False
+        self._pan_start = None
 
     def run(self, interval_ms: int) -> None:
         """Show the window and refresh until the user closes it."""
         # FuncAnimation must be kept referenced or the GUI loop discards it.
         self._animation = FuncAnimation(self._figure, self._update, interval=interval_ms,
                                         blit=False, cache_frame_data=False)
-        print("viewer: toolbar zoom/pan enabled, press 'r' to reset view")
+        print("viewer: scroll=zoom, drag=pan, 'r'=reset")
         plt.show()
+
+    def _on_scroll(self, event) -> None:
+        """Zoom in/out centred on the cursor (trackpad two-finger scroll)."""
+        if event.inaxes != self._axes:
+            return
+        factor = 0.8 if event.button == "up" else 1.25
+        r_max = self._axes.get_ylim()[1]
+        # Zoom the radial axis toward the cursor's radius.
+        anchor = event.ydata if event.ydata is not None else r_max * 0.5
+        new_max = anchor + (r_max - anchor) * factor
+        new_max = max(100.0, min(new_max, self._max_range_mm))
+        self._axes.set_ylim(0.0, new_max)
+        self._figure.canvas.draw_idle()
+
+    def _on_press(self, event) -> None:
+        """Begin a pan drag on left-button press."""
+        if event.button == 1 and event.inaxes == self._axes:
+            self._panning = True
+            self._pan_start = (event.xdata, event.ydata)
+
+    def _on_drag(self, event) -> None:
+        """Pan the view by shifting the radial limit."""
+        if not self._panning or event.inaxes != self._axes:
+            return
+        if self._pan_start is None or event.xdata is None or event.ydata is None:
+            return
+        dy = event.ydata - self._pan_start[1]
+        r_max = self._axes.get_ylim()[1]
+        new_max = max(100.0, min(r_max - dy, self._max_range_mm))
+        self._axes.set_ylim(0.0, new_max)
+        self._pan_start = (event.xdata, event.ydata)
+        self._figure.canvas.draw_idle()
+
+    def _on_release(self, event) -> None:
+        """End a pan drag."""
+        self._panning = False
+        self._pan_start = None
 
     def _on_key_press(self, event) -> None:
         """Handle keyboard shortcuts."""
