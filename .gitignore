@@ -1,0 +1,31 @@
+# Build output
+build/
+out/
+cmake-build-*/
+compile_commands.json
+CMakeCache.txt
+CMakeFiles/
+*.o
+*.a
+*.so
+*.d
+
+# Vendored / external SDKs are not committed; see README for setup
+rplidar_sdk/
+sdk/
+
+# Recorded scan data (Phase 2)
+*.aeb
+recordings/
+
+# Python viewer
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
