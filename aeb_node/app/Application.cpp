@@ -85,7 +85,9 @@ bool Application::startLidar()
     // *before* the publish, so the safety path never waits on, or depends on,
     // development infrastructure - including when `server` is null.
     TcpServer* const server = server_.get();
-    const bool started = lidar_->start([server](const ScanFrame& frame) {
+    const bool started = lidar_->start([this, server](const ScanFrame& frame) {
+        const DetectionResult result = perception_.process(frame);
+        std::cout << "Valid points: " << result.valid_points << '\n';
         if (server != nullptr) {
             server->publish(frame);
         }

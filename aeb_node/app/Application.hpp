@@ -28,6 +28,7 @@
 #include "app/SignalWaiter.hpp"
 #include "lidar/Lidar.hpp"
 #include "network/TcpServer.hpp"
+#include "perception/Perception.hpp"
 
 namespace aeb::app {
 
@@ -96,6 +97,14 @@ private:
 
     /** @brief Acquisition driver; null until started. */
     std::unique_ptr<Lidar> lidar_;
+
+    /**
+     * @brief Runs ahead of network publish on every acquired frame.
+     *
+     * First version only counts valid points; it does not yet gate or alter
+     * @ref TcpServer::publish in any way.
+     */
+    Perception perception_;
 
     /**
      * @brief Read-error count at the previous health report.

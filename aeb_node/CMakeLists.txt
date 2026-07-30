@@ -192,6 +192,19 @@ target_link_libraries(aeb_network
     PUBLIC aeb_common Threads::Threads)
 
 # ------------------------------------------------------------------------------
+# aeb_perception - obstacle detection
+#
+# Depends only on aeb_common, exactly like aeb_lidar, so it cannot acquire a
+# dependency on the development networking layer.
+# ------------------------------------------------------------------------------
+
+add_library(aeb_perception STATIC
+    perception/Perception.cpp)
+
+target_link_libraries(aeb_perception
+    PUBLIC aeb_common)
+
+# ------------------------------------------------------------------------------
 # aeb_app - composition root
 # ------------------------------------------------------------------------------
 
@@ -201,7 +214,7 @@ add_library(aeb_app STATIC
     app/SignalWaiter.cpp)
 
 target_link_libraries(aeb_app
-    PUBLIC aeb_lidar aeb_network)
+    PUBLIC aeb_lidar aeb_network aeb_perception)
 
 # ------------------------------------------------------------------------------
 # aeb_node - executable
