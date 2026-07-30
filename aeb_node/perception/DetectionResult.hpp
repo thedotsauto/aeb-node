@@ -11,17 +11,23 @@ namespace aeb {
  * fields are reserved for a later phase and are not yet populated.
  */
 struct DetectionResult {
-    /** @brief Reserved for a future obstacle-detection phase; not yet set. */
+    /** @brief True if an obstacle is detected in the monitored zone. */
     bool obstacle_detected = false;
 
-    /** @brief Reserved for a future obstacle-detection phase; not yet set. */
+    /** @brief Distance to the nearest obstacle in millimetres, or -1.0f if none. */
     float nearest_distance_mm = -1.0f;
 
-    /** @brief Reserved for a future obstacle-detection phase; not yet set. */
+    /** @brief Angle to the nearest obstacle in degrees, or 0.0f if none. */
     float nearest_angle_deg = 0.0f;
 
-    /** @brief Number of scan points counted by @ref Perception::process. */
-    std::uint32_t valid_points = 0;
+    /** @brief Total raw points in the source ScanFrame. */
+    std::uint32_t total_points = 0;
+
+    /** @brief Points remaining after quality and angle filtering. */
+    std::uint32_t angle_filtered_points = 0;
+
+    /** @brief Points remaining after quality, angle, and distance filtering. */
+    std::uint32_t distance_filtered_points = 0;
 
     /** @brief Timestamp copied from the source @c ScanFrame. */
     std::uint64_t timestamp = 0;

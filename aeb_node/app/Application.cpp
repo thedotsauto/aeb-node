@@ -87,7 +87,11 @@ bool Application::startLidar()
     TcpServer* const server = server_.get();
     const bool started = lidar_->start([this, server](const ScanFrame& frame) {
         const DetectionResult result = perception_.process(frame);
-        std::cout << "Valid points: " << result.valid_points << '\n';
+        std::cout << "Total points: " << result.total_points << '\n'
+                  << "After angle filter: " << result.angle_filtered_points << '\n'
+                  << "After distance filter: " << result.distance_filtered_points << '\n'
+                  << "Nearest obstacle: " << result.nearest_distance_mm << " mm @ "
+                  << result.nearest_angle_deg << "°\n";
         if (server != nullptr) {
             server->publish(frame);
         }
