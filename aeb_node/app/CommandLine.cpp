@@ -15,8 +15,6 @@ namespace {
 /** @brief Largest accepted value for a numeric option. */
 constexpr unsigned long kMaxNumericValue = 0xFFFFFFFFUL;
 
-/** @brief Highest valid TCP port number. */
-constexpr std::uint32_t kMaxPort = 65535U;
 
 /**
  * @brief Parse a non-negative decimal integer, rejecting trailing junk.
@@ -56,10 +54,6 @@ constexpr std::uint32_t kMaxPort = 65535U;
  */
 [[nodiscard]] bool applyFlag(const std::string& arg, Options& out)
 {
-    if (arg == "--no-network") {
-        out.enable_network = false;
-        return true;
-    }
     if (arg == "--no-reconnect") {
         out.lidar.auto_reconnect = false;
         return true;
@@ -88,32 +82,8 @@ constexpr std::uint32_t kMaxPort = 65535U;
     if (arg == "--scan-timeout-ms") {
         return parseUnsigned(value, out.lidar.scan_timeout_ms, error, arg);
     }
-    if (arg == "--bind") {
-        out.network.bind_address = value;
-        return true;
-    }
-    if (arg == "--port") {
-        std::uint32_t port = 0U;
-        if (!parseUnsigned(value, port, error, arg)) {
-            return false;
-        }
-        if (port == 0U || port > kMaxPort) {
-            error = "--port must be in the range 1.." + std::to_string(kMaxPort);
-            return false;
-        }
-        out.network.port = static_cast<std::uint16_t>(port);
-        return true;
-    }
-    if (arg == "--queue") {
-        std::uint32_t depth = 0U;
-        if (!parseUnsigned(value, depth, error, arg)) {
-            return false;
-        }
-        if (depth == 0U) {
-            error = "--queue must be a positive integer";
-            return false;
-        }
-        out.network.queue_capacity = depth;
+    if (arg == "--can-interface") {
+        out.canbus.interface = value;
         return true;
     }
     if (arg == "--health-interval") {
@@ -167,11 +137,8 @@ void CommandLine::printUsage(const char* program)
               << "  --baud RATE             Baud rate (default 460800)\n"
               << "  --scan-timeout-ms MS    Per-revolution timeout (default 2000)\n"
               << "  --no-reconnect          Exit acquisition on device error\n\n"
-              << "Development network stream:\n"
-              << "  --bind ADDRESS          Listen address (default 0.0.0.0)\n"
-              << "  --port PORT             Listen port (default 7000)\n"
-              << "  --queue DEPTH           Outbound frame queue depth (default 16)\n"
-              << "  --no-network            Disable streaming entirely\n\n"
+              << "CAN bus:\n"
+              << "  --can-interface NAME    SocketCAN interface (default can0)\n\n"
               << "Diagnostics:\n"
               << "  --health-interval SEC   Health report period, 0 disables (default 5)\n"
               << "  -h, --help              Show this message\n";

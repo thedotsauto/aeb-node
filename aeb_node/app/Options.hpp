@@ -11,8 +11,8 @@
 #ifndef AEB_APP_OPTIONS_HPP
 #define AEB_APP_OPTIONS_HPP
 
+#include "canbus/CanBus.hpp"
 #include "lidar/Lidar.hpp"
-#include "network/TcpServer.hpp"
 
 namespace aeb::app {
 
@@ -23,17 +23,8 @@ struct Options {
     /** @brief Lidar acquisition settings. */
     LidarConfig lidar{};
 
-    /** @brief Development streaming server settings. */
-    TcpServerConfig network{};
-
-    /**
-     * @brief Whether to build and run the networking layer at all.
-     *
-     * When @c false no socket is ever created. This is the intended vehicle
-     * configuration, and it continuously proves that acquisition - and, from
-     * Phase 3, perception and braking - have no dependency on the network.
-     */
-    bool enable_network{true};
+    /** @brief SocketCAN braking output settings. */
+    CanBusConfig canbus{};
 
     /** @brief Interval between health reports in seconds; 0 disables them. */
     unsigned health_interval_s{5U};

@@ -3,22 +3,23 @@
 #
 # Build layout mirrors the architecture, one static library per layer:
 #
-#   aeb_common   (header only)  domain types and the wire protocol
-#   aeb_lidar                   acquisition; the only consumer of the Slamtec SDK
-#   aeb_network                 development streaming server
-#   aeb_app                     composition root
-#   aeb_node     (executable)   entry point
+#   aeb_common     (header only)  domain types and the wire protocol
+#   aeb_lidar                      acquisition; the only consumer of the Slamtec SDK
+#   aeb_perception                 obstacle detection
+#   aeb_canbus                     SocketCAN braking output
+#   aeb_app                        composition root
+#   aeb_node       (executable)    entry point
 #
 # The dependency edges are declared explicitly and deliberately:
 #
-#   aeb_lidar   -> aeb_common
-#   aeb_network -> aeb_common
-#   aeb_app     -> aeb_lidar, aeb_network
+#   aeb_lidar      -> aeb_common
+#   aeb_perception -> aeb_common
+#   aeb_canbus     -> aeb_common
+#   aeb_app        -> aeb_lidar, aeb_perception, aeb_canbus
 #
-# Note what is absent: aeb_lidar does NOT link aeb_network. The Phase 3
-# perception and braking library must follow the same rule, so that the
-# safety path cannot acquire a dependency on development infrastructure even
-# by accident. A link error is a far better guard than a code review comment.
+# None of the safety-path libraries (lidar, perception, canbus) may link
+# each other or any development infrastructure. A link error enforces this
+# better than a code review comment.
 # ------------------------------------------------------------------------------
 
 cmake_minimum_required(VERSION 3.16)
@@ -179,17 +180,14 @@ target_link_libraries(aeb_lidar
     PRIVATE Slamtec::LidarSdk)
 
 # ------------------------------------------------------------------------------
-# aeb_network - development streaming server
+# aeb_canbus - SocketCAN braking output
 # ------------------------------------------------------------------------------
 
-add_library(aeb_network STATIC
-    network/TcpServer.cpp
-    network/ClientSession.cpp
-    network/FrameQueue.cpp
-    network/ListenSocket.cpp)
+add_library(aeb_canbus STATIC
+    canbus/CanBus.cpp)
 
-target_link_libraries(aeb_network
-    PUBLIC aeb_common Threads::Threads)
+target_link_libraries(aeb_canbus
+    PUBLIC aeb_common)
 
 # ------------------------------------------------------------------------------
 # aeb_perception - obstacle detection
@@ -214,7 +212,7 @@ add_library(aeb_app STATIC
     app/SignalWaiter.cpp)
 
 target_link_libraries(aeb_app
-    PUBLIC aeb_lidar aeb_network aeb_perception)
+    PUBLIC aeb_lidar aeb_perception aeb_canbus)
 
 # ------------------------------------------------------------------------------
 # aeb_node - executable

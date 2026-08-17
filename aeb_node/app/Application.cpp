@@ -22,9 +22,20 @@ constexpr int kExitFailure = 1;
 /** @brief Supervision tick used when health reporting is disabled. */
 constexpr std::chrono::milliseconds kIdleTick{1000};
 
+/** @brief CAN arbitration ID for the braking command frame. */
+constexpr std::uint32_t kBrakeCanId = 0x080U;
+
+/** @brief Payload: disengage the brake (no obstacle detected). */
+constexpr std::uint8_t kBrakeDisengage = 0x01U;
+
+/** @brief Payload: engage the brake (obstacle detected in at least one sector). */
+constexpr std::uint8_t kBrakeEngage = 0x02U;
+
 }  // namespace
 
-Application::Application(Options options) : options_{std::move(options)} {}
+Application::Application(Options options)
+    : options_{std::move(options)}, can_bus_{options_.canbus}
+{}
 
 Application::~Application()
 {
@@ -41,7 +52,7 @@ int Application::run()
         return kExitFailure;
     }
 
-    if (!startNetwork()) {
+    if (!startCanBus()) {
         return kExitFailure;
     }
     if (!startLidar()) {
@@ -56,22 +67,14 @@ int Application::run()
     return exit_code;
 }
 
-bool Application::startNetwork()
+bool Application::startCanBus()
 {
-    if (!options_.enable_network) {
-        std::cout << "aeb_node: networking disabled\n";
-        return true;
-    }
-
-    server_ = std::make_unique<TcpServer>(options_.network);
-    if (!server_->start()) {
-        std::cerr << "fatal: TcpServer::start failed: " << server_->lastError() << '\n';
-        server_.reset();
+    if (!can_bus_.open()) {
+        std::cerr << "fatal: CanBus::open failed: " << can_bus_.lastError() << '\n';
         return false;
     }
 
-    std::cout << "aeb_node: streaming on " << options_.network.bind_address << ':'
-              << options_.network.port << '\n';
+    std::cout << "aeb_node: CAN interface " << options_.canbus.interface << " open\n";
     return true;
 }
 
@@ -79,26 +82,30 @@ bool Application::startLidar()
 {
     lidar_ = std::make_unique<Lidar>(options_.lidar);
 
-    // The single fan-out point, executed on the acquisition thread. Every
-    // consumer attached here must be non-blocking; TcpServer::publish
-    // guarantees that by contract. A future obstacle detector is invoked
-    // *before* the publish, so the safety path never waits on, or depends on,
-    // development infrastructure - including when `server` is null.
-    TcpServer* const server = server_.get();
-    const bool started = lidar_->start([this, server](const ScanFrame& frame) {
+    // The single fan-out point, executed on the acquisition thread.
+    // Perception runs first; then a non-blocking CAN frame is sent.
+    // Nothing here may block: CanBus::send uses MSG_DONTWAIT.
+    CanBus* const can = &can_bus_;
+    const bool started = lidar_->start([this, can](const ScanFrame& frame) {
         const DetectionResult result = perception_.process(frame);
-        std::cout << "Total points: " << result.total_points << '\n'
-                  << "After angle filter: " << result.angle_filtered_points << '\n'
-                  << "After distance filter: " << result.distance_filtered_points << '\n'
-                  << "After quality filter: " << result.quality_filtered_points << "\n\n"
-                  << "Left: " << result.left.nearest_distance_mm << " mm @ " << result.left.nearest_angle_deg << "°\n"
-                  << "Left-Center: " << result.left_center.nearest_distance_mm << " mm @ " << result.left_center.nearest_angle_deg << "°\n"
-                  << "Center: " << result.center.nearest_distance_mm << " mm @ " << result.center.nearest_angle_deg << "°\n"
-                  << "Right-Center: " << result.right_center.nearest_distance_mm << " mm @ " << result.right_center.nearest_angle_deg << "°\n"
-                  << "Right: " << result.right.nearest_distance_mm << " mm @ " << result.right.nearest_angle_deg << "°\n";
-        if (server != nullptr) {
-            server->publish(frame);
-        }
+
+        const bool obstacle =
+            result.left.obstacle_detected        ||
+            result.left_center.obstacle_detected  ||
+            result.center.obstacle_detected       ||
+            result.right_center.obstacle_detected ||
+            result.right.obstacle_detected;
+
+        CanMessage msg;
+        msg.id     = kBrakeCanId;
+        msg.dlc    = 1U;
+        msg.data[0] = obstacle ? kBrakeEngage : kBrakeDisengage;
+        can->send(msg);
+
+        std::cout << (obstacle ? "BRAKE  " : "clear  ")
+                  << "pts=" << result.total_points
+                  << " filt=" << result.quality_filtered_points
+                  << '\n';
     });
 
     if (!started) {
@@ -145,15 +152,8 @@ void Application::reportHealth()
     std::cout << "health: frames=" << lidar_stats.frames_delivered
               << " errors=" << lidar_stats.read_errors
               << " empty=" << lidar_stats.empty_frames
-              << " connects=" << lidar_stats.connects;
-
-    if (server_) {
-        const TcpServerStats net_stats = server_->stats();
-        std::cout << " | client=" << (net_stats.client_connected ? "yes" : "no")
-                  << " sent=" << net_stats.frames_sent
-                  << " dropped=" << net_stats.frames_dropped
-                  << " bytes=" << net_stats.bytes_sent;
-    }
+              << " connects=" << lidar_stats.connects
+              << " can=" << (can_bus_.isOpen() ? "open" : "closed");
 
     // Report the driver's own description only for errors that occurred since
     // the previous tick. Repeating a start-up timeout for the life of the
@@ -171,13 +171,12 @@ void Application::reportHealth()
 
 void Application::shutdown() noexcept
 {
-    // Reverse construction order: stop producing before destroying consumers,
-    // so no frame is ever published into a half-destroyed server.
+    // Lidar first: stop producing frames before releasing any consumer.
     if (lidar_) {
         lidar_->stop();
     }
-    server_.reset();
     lidar_.reset();
+    can_bus_.close();
 }
 
 }  // namespace aeb::app

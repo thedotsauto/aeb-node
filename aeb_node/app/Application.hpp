@@ -9,13 +9,13 @@
  * @section wiring Wiring
  *
  * @code
- * Lidar --(callback, must not block)--> TcpServer --> Mac viewer
+ * Lidar --(callback, must not block)--> Perception --> CanBus (brake command)
  * @endcode
  *
- * The lidar callback is the single fan-out point. In Phase 3 the obstacle
- * detector attaches to that same callback *ahead of* the network publish, so
- * the safety path runs first and unconditionally, and continues to run when the
- * networking layer is absent or its client has gone away.
+ * The lidar callback is the single fan-out point. Perception runs first;
+ * if any sector contains an obstacle, a CAN brake command is sent before
+ * returning. The safety path never waits on, or depends on, any development
+ * infrastructure.
  */
 
 #ifndef AEB_APP_APPLICATION_HPP
@@ -26,8 +26,8 @@
 
 #include "app/Options.hpp"
 #include "app/SignalWaiter.hpp"
+#include "canbus/CanBus.hpp"
 #include "lidar/Lidar.hpp"
-#include "network/TcpServer.hpp"
 #include "perception/Perception.hpp"
 
 namespace aeb::app {
@@ -65,10 +65,10 @@ public:
 
 private:
     /**
-     * @brief Create and start the development streaming server, if enabled.
-     * @return @c true if it is running, or intentionally disabled.
+     * @brief Open the SocketCAN interface for braking output.
+     * @return @c true if the interface is open.
      */
-    [[nodiscard]] bool startNetwork();
+    [[nodiscard]] bool startCanBus();
 
     /**
      * @brief Create the lidar and begin acquisition.
@@ -92,18 +92,13 @@ private:
     /** @brief Immutable runtime configuration. */
     Options options_;
 
-    /** @brief Development streaming server; null when disabled. */
-    std::unique_ptr<TcpServer> server_;
+    /** @brief SocketCAN braking output. */
+    CanBus can_bus_;
 
     /** @brief Acquisition driver; null until started. */
     std::unique_ptr<Lidar> lidar_;
 
-    /**
-     * @brief Runs ahead of network publish on every acquired frame.
-     *
-     * First version only counts valid points; it does not yet gate or alter
-     * @ref TcpServer::publish in any way.
-     */
+    /** @brief Obstacle detection; runs on every acquired frame. */
     Perception perception_;
 
     /**
