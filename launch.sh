@@ -42,9 +42,11 @@ LIDAR_DEVICE="${LIDAR_DEVICE:-/dev/ttyUSB0}"
 
 # Parse flags
 SKIP_BUILD=0
+SKIP_TOF=0
 for arg in "$@"; do
     case "$arg" in
         --no-build) SKIP_BUILD=1 ;;
+        --no-tof)   SKIP_TOF=1 ;;
         *) die "Unknown argument: $arg" ;;
     esac
 done
@@ -130,12 +132,16 @@ log "Starting aeb_node (lidar → perception → CAN)..."
     --health-interval 5 &
 AEB_PID=$!
 
-log "Starting tof_node.py (VL53L5CX → CAN)..."
-"$TOF_PYTHON" "$REPO_DIR/tof/tof_node.py" \
-    --can-interface "$CAN_INTERFACE" &
-TOF_PID=$!
-
-log "Both nodes running (aeb_node PID=$AEB_PID, tof_node PID=$TOF_PID)"
+TOF_PID=""
+if [[ "$SKIP_TOF" -eq 0 ]]; then
+    log "Starting tof_node.py (VL53L5CX → CAN)..."
+    "$TOF_PYTHON" "$REPO_DIR/tof/tof_node.py" \
+        --can-interface "$CAN_INTERFACE" &
+    TOF_PID=$!
+    log "Both nodes running (aeb_node PID=$AEB_PID, tof_node PID=$TOF_PID)"
+else
+    log "ToF disabled (--no-tof). Only aeb_node running (PID=$AEB_PID)"
+fi
 log "Press Ctrl-C to stop."
 
 # ---------------------------------------------------------------------------
@@ -143,15 +149,16 @@ log "Press Ctrl-C to stop."
 # ---------------------------------------------------------------------------
 cleanup() {
     log "Shutting down..."
-    kill "$AEB_PID" "$TOF_PID" 2>/dev/null || true
-    wait "$AEB_PID" "$TOF_PID" 2>/dev/null || true
+    kill "$AEB_PID" ${TOF_PID:+"$TOF_PID"} 2>/dev/null || true
+    wait "$AEB_PID" ${TOF_PID:+"$TOF_PID"} 2>/dev/null || true
     sudo ip link set "$CAN_INTERFACE" down 2>/dev/null || true
     log "Done."
 }
 trap cleanup INT TERM
 
 # Wait for either process to exit (crash or signal)
-wait -n "$AEB_PID" "$TOF_PID" 2>/dev/null || true
+# shellcheck disable=SC2086
+wait -n "$AEB_PID" ${TOF_PID:+"$TOF_PID"} 2>/dev/null || true
 
 # If one exited (e.g. crashed), kill the other
 cleanup
