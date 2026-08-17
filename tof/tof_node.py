@@ -66,7 +66,7 @@ def main() -> int:
 
     # --- CAN bus setup ------------------------------------------------------
     try:
-        bus = can.interface.Bus(channel=args.can_interface, bustype="socketcan")
+        bus = can.interface.Bus(channel=args.can_interface, interface="socketcan")
     except OSError as exc:
         print(f"tof_node: cannot open CAN interface {args.can_interface}: {exc}",
               file=sys.stderr)
