@@ -45,7 +45,7 @@ import sys
 import time
 
 import can
-from vl53l5cx import VL53L5CX
+from vl53l5cx.vl53l5cx import VL53L5CX
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -75,6 +75,7 @@ def main() -> int:
     # --- VL53L5CX setup -----------------------------------------------------
     try:
         sensor = VL53L5CX()
+        sensor.init()
     except Exception as exc:
         print(f"tof_node: cannot initialise VL53L5CX: {exc}", file=sys.stderr)
         bus.shutdown()
@@ -86,11 +87,11 @@ def main() -> int:
 
     try:
         while True:
-            if not sensor.data_ready():
+            if not sensor.check_data_ready():
                 time.sleep(POLL_SLEEP_S)
                 continue
 
-            data = sensor.get_data()
+            data = sensor.get_ranging_data()
 
             # Any zone with a positive, in-range reading triggers the brake.
             obstacle = any(
