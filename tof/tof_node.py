@@ -74,6 +74,7 @@ def main() -> int:
 
     # --- VL53L5CX setup -----------------------------------------------------
     try:
+        time.sleep(0.5)  # allow sensor to complete power-on boot
         sensor = VL53L5CX()
         sensor.init()
     except Exception as exc:
