@@ -90,8 +90,12 @@ bool Application::startLidar()
         std::cout << "Total points: " << result.total_points << '\n'
                   << "After angle filter: " << result.angle_filtered_points << '\n'
                   << "After distance filter: " << result.distance_filtered_points << '\n'
-                  << "Nearest obstacle: " << result.nearest_distance_mm << " mm @ "
-                  << result.nearest_angle_deg << "°\n";
+                  << "After quality filter: " << result.quality_filtered_points << "\n\n"
+                  << "Left: " << result.left.nearest_distance_mm << " mm @ " << result.left.nearest_angle_deg << "°\n"
+                  << "Left-Center: " << result.left_center.nearest_distance_mm << " mm @ " << result.left_center.nearest_angle_deg << "°\n"
+                  << "Center: " << result.center.nearest_distance_mm << " mm @ " << result.center.nearest_angle_deg << "°\n"
+                  << "Right-Center: " << result.right_center.nearest_distance_mm << " mm @ " << result.right_center.nearest_angle_deg << "°\n"
+                  << "Right: " << result.right.nearest_distance_mm << " mm @ " << result.right.nearest_angle_deg << "°\n";
         if (server != nullptr) {
             server->publish(frame);
         }
