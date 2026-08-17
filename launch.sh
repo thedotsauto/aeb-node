@@ -12,7 +12,8 @@
 #
 # Usage:
 #   chmod +x launch.sh
-#   ./launch.sh
+#   ./launch.sh            # full build on every run
+#   ./launch.sh --no-build # skip cmake + pip (use after first successful build)
 #
 # Override defaults via environment variables before running:
 #   RPLIDAR_SDK_DIR=/path/to/rplidar_sdk ./launch.sh
@@ -20,6 +21,13 @@
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+log()  { echo "[launch] $*"; }
+err()  { echo "[launch] ERROR: $*" >&2; }
+die()  { err "$*"; exit 1; }
 
 # ---------------------------------------------------------------------------
 # Configuration – override with environment variables if needed
@@ -32,12 +40,14 @@ CAN_INTERFACE="${CAN_INTERFACE:-can0}"
 CAN_BITRATE="${CAN_BITRATE:-500000}"
 LIDAR_DEVICE="${LIDAR_DEVICE:-/dev/ttyUSB0}"
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-log()  { echo "[launch] $*"; }
-err()  { echo "[launch] ERROR: $*" >&2; }
-die()  { err "$*"; exit 1; }
+# Parse flags
+SKIP_BUILD=0
+for arg in "$@"; do
+    case "$arg" in
+        --no-build) SKIP_BUILD=1 ;;
+        *) die "Unknown argument: $arg" ;;
+    esac
+done
 
 # ---------------------------------------------------------------------------
 # 1. SocketCAN interface setup
@@ -62,31 +72,37 @@ git -C "$REPO_DIR" pull --ff-only || log "git pull failed – continuing with lo
 # ---------------------------------------------------------------------------
 # 3. CMake configure + build (C++ lidar + CAN node)
 # ---------------------------------------------------------------------------
-if [[ ! -d "$RPLIDAR_SDK_DIR" ]]; then
-    die "RPLidar SDK not found at $RPLIDAR_SDK_DIR. Set RPLIDAR_SDK_DIR and re-run."
+AEB_BIN="$BUILD_DIR/bin/aeb_node"
+
+if [[ "$SKIP_BUILD" -eq 1 ]]; then
+    log "Skipping build (--no-build)."
+    [[ -x "$AEB_BIN" ]] || die "--no-build specified but binary not found at $AEB_BIN. Run without --no-build first."
+else
+    if [[ ! -d "$RPLIDAR_SDK_DIR" ]]; then
+        die "RPLidar SDK not found at $RPLIDAR_SDK_DIR. Set RPLIDAR_SDK_DIR and re-run."
+    fi
+
+    log "Configuring CMake build..."
+    cmake -B "$BUILD_DIR" \
+          -S "$REPO_DIR/aeb_node" \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DAEB_RPLIDAR_SDK_DIR="$RPLIDAR_SDK_DIR" \
+          -DAEB_WARNINGS_AS_ERRORS=OFF \
+          --log-level=WARNING
+
+    log "Building aeb_node (this may take a few minutes on Pi Zero W)..."
+    cmake --build "$BUILD_DIR" -j"$(nproc)"
+
+    [[ -x "$AEB_BIN" ]] || die "Build succeeded but binary not found at $AEB_BIN"
+    log "aeb_node built: $AEB_BIN"
+
+    log "Installing ToF Python dependencies..."
+    pip3 install -q -r "$REPO_DIR/tof/requirements.txt" \
+        || die "pip3 install failed. Check network connection."
+    log "ToF dependencies installed."
 fi
 
-log "Configuring CMake build..."
-cmake -B "$BUILD_DIR" \
-      -S "$REPO_DIR/aeb_node" \
-      -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-      -DAEB_RPLIDAR_SDK_DIR="$RPLIDAR_SDK_DIR" \
-      -DAEB_WARNINGS_AS_ERRORS=OFF \
-      --log-level=WARNING
-
-log "Building aeb_node (this may take a few minutes on Pi Zero W)..."
-cmake --build "$BUILD_DIR" -j"$(nproc)"
-
-AEB_BIN="$BUILD_DIR/bin/aeb_node"
-[[ -x "$AEB_BIN" ]] || die "Build succeeded but binary not found at $AEB_BIN"
-log "aeb_node built: $AEB_BIN"
-
-# ---------------------------------------------------------------------------
-# 4. Python dependencies for ToF node
-# ---------------------------------------------------------------------------
-log "Installing ToF Python dependencies..."
-pip3 install -q -r "$REPO_DIR/tof/requirements.txt" \
-    || die "pip3 install failed. Check network and pip configuration."
+TOF_PYTHON="python3"
 
 # ---------------------------------------------------------------------------
 # 5. Pre-flight checks
@@ -115,7 +131,7 @@ log "Starting aeb_node (lidar → perception → CAN)..."
 AEB_PID=$!
 
 log "Starting tof_node.py (VL53L5CX → CAN)..."
-python3 "$REPO_DIR/tof/tof_node.py" \
+"$TOF_PYTHON" "$REPO_DIR/tof/tof_node.py" \
     --can-interface "$CAN_INTERFACE" &
 TOF_PID=$!
 
