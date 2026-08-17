@@ -15,7 +15,7 @@ struct PerceptionConfig {
     float max_angle_deg = 80.0f;
 
     /** @brief Points beyond this range are ignored, in millimetres. */
-    float max_distance_mm = 4000.0f;
+    float max_distance_mm = 2000.0f;
 
     /** @brief Points reported below this quality are ignored. */
     std::uint8_t minimum_quality = 15;

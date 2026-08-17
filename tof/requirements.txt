@@ -1,0 +1,5 @@
+# VL53L5CX 8x8 ToF driver (Pimoroni Python binding for the ST ULD)
+vl53l5cx
+
+# SocketCAN interface for Python
+python-can
