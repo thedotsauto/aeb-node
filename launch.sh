@@ -106,10 +106,12 @@ else
     [[ -x "$AEB_BIN" ]] || die "Build succeeded but binary not found at $AEB_BIN"
     log "aeb_node built: $AEB_BIN"
 
-    log "Installing ToF Python dependencies..."
-    pip3 install -q -r "$REPO_DIR/tof/requirements.txt" \
-        || die "pip3 install failed. Check network connection."
-    log "ToF dependencies installed."
+    if [[ "$SKIP_TOF" -eq 0 ]]; then
+        log "Installing ToF Python dependencies..."
+        pip3 install -q -r "$REPO_DIR/tof/requirements.txt" \
+            || die "pip3 install failed. Check network connection."
+        log "ToF dependencies installed."
+    fi
 fi
 
 TOF_PYTHON="python3"
