@@ -12,8 +12,10 @@
 #
 # Usage:
 #   chmod +x launch.sh
-#   ./launch.sh            # full build on every run
-#   ./launch.sh --no-build # skip cmake + pip (use after first successful build)
+#   ./launch.sh                     # full build on every run
+#   ./launch.sh --no-build          # skip cmake + pip (after first build)
+#   ./launch.sh --no-can            # viewer-only, no MCP2515 HAT needed
+#   ./launch.sh --no-build --no-can # fast viewer-only start
 #
 # Override defaults via environment variables before running:
 #   RPLIDAR_SDK_DIR=/path/to/rplidar_sdk ./launch.sh
@@ -43,10 +45,12 @@ LIDAR_DEVICE="${LIDAR_DEVICE:-/dev/ttyUSB0}"
 # Parse flags
 SKIP_BUILD=0
 SKIP_TOF=0
+SKIP_CAN=0
 for arg in "$@"; do
     case "$arg" in
         --no-build) SKIP_BUILD=1 ;;
         --no-tof)   SKIP_TOF=1 ;;
+        --no-can)   SKIP_CAN=1 ;;
         *) die "Unknown argument: $arg" ;;
     esac
 done
@@ -54,16 +58,20 @@ done
 # ---------------------------------------------------------------------------
 # 1. SocketCAN interface setup
 # ---------------------------------------------------------------------------
-log "Bringing up $CAN_INTERFACE at $CAN_BITRATE bps..."
+if [[ "$SKIP_CAN" -eq 1 ]]; then
+    log "CAN disabled (--no-can), skipping interface setup."
+else
+    log "Bringing up $CAN_INTERFACE at $CAN_BITRATE bps..."
 
-# Silently take the interface down first (it may already be up with wrong config)
-sudo ip link set "$CAN_INTERFACE" down 2>/dev/null || true
-sudo ip link set "$CAN_INTERFACE" type can bitrate "$CAN_BITRATE" \
-    || die "Could not configure $CAN_INTERFACE. Is the MCP2515 HAT present and the driver loaded?"
-sudo ip link set "$CAN_INTERFACE" up \
-    || die "Could not bring up $CAN_INTERFACE"
+    # Silently take the interface down first (it may already be up with wrong config)
+    sudo ip link set "$CAN_INTERFACE" down 2>/dev/null || true
+    sudo ip link set "$CAN_INTERFACE" type can bitrate "$CAN_BITRATE" \
+        || die "Could not configure $CAN_INTERFACE. Is the MCP2515 HAT present and the driver loaded?"
+    sudo ip link set "$CAN_INTERFACE" up \
+        || die "Could not bring up $CAN_INTERFACE"
 
-log "$CAN_INTERFACE is up at $CAN_BITRATE bps"
+    log "$CAN_INTERFACE is up at $CAN_BITRATE bps"
+fi
 
 # ---------------------------------------------------------------------------
 # 2. Pull latest code
@@ -126,10 +134,13 @@ fi
 # 6. Launch both nodes
 # ---------------------------------------------------------------------------
 log "Starting aeb_node (lidar → perception → CAN)..."
-"$AEB_BIN" \
-    --device "$LIDAR_DEVICE" \
-    --can-interface "$CAN_INTERFACE" \
-    --health-interval 5 &
+AEB_ARGS=(--device "$LIDAR_DEVICE" --health-interval 5)
+if [[ "$SKIP_CAN" -eq 1 ]]; then
+    AEB_ARGS+=(--no-can)
+else
+    AEB_ARGS+=(--can-interface "$CAN_INTERFACE")
+fi
+"$AEB_BIN" "${AEB_ARGS[@]}" &
 AEB_PID=$!
 
 TOF_PID=""
@@ -151,7 +162,9 @@ cleanup() {
     log "Shutting down..."
     kill "$AEB_PID" ${TOF_PID:+"$TOF_PID"} 2>/dev/null || true
     wait "$AEB_PID" ${TOF_PID:+"$TOF_PID"} 2>/dev/null || true
-    sudo ip link set "$CAN_INTERFACE" down 2>/dev/null || true
+    if [[ "$SKIP_CAN" -eq 0 ]]; then
+        sudo ip link set "$CAN_INTERFACE" down 2>/dev/null || true
+    fi
     log "Done."
 }
 trap cleanup INT TERM
