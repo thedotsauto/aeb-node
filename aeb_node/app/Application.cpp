@@ -34,7 +34,9 @@ constexpr std::uint8_t kBrakeEngage = 0x02U;
 }  // namespace
 
 Application::Application(Options options)
-    : options_{std::move(options)}, can_bus_{options_.canbus}
+    : options_{std::move(options)}
+    , can_bus_{options_.canbus}
+    , tcp_server_{options_.tcp_server}
 {}
 
 Application::~Application()
@@ -55,6 +57,10 @@ int Application::run()
     if (!startCanBus()) {
         return kExitFailure;
     }
+    if (!startTcpServer()) {
+        shutdown();
+        return kExitFailure;
+    }
     if (!startLidar()) {
         shutdown();
         return kExitFailure;
@@ -69,12 +75,29 @@ int Application::run()
 
 bool Application::startCanBus()
 {
+    if (options_.no_can) {
+        std::cout << "aeb_node: CAN disabled (--no-can), running in viewer-only mode\n";
+        return true;
+    }
+
     if (!can_bus_.open()) {
         std::cerr << "fatal: CanBus::open failed: " << can_bus_.lastError() << '\n';
         return false;
     }
 
     std::cout << "aeb_node: CAN interface " << options_.canbus.interface << " open\n";
+    return true;
+}
+
+bool Application::startTcpServer()
+{
+    if (!tcp_server_.start()) {
+        std::cerr << "fatal: TcpServer::start failed: " << tcp_server_.lastError() << '\n';
+        return false;
+    }
+
+    std::cout << "aeb_node: TCP visualisation server listening on port "
+              << options_.tcp_server.port << '\n';
     return true;
 }
 
@@ -86,7 +109,11 @@ bool Application::startLidar()
     // Perception runs first; then a non-blocking CAN frame is sent.
     // Nothing here may block: CanBus::send uses MSG_DONTWAIT.
     CanBus* const can = &can_bus_;
-    const bool started = lidar_->start([this, can](const ScanFrame& frame) {
+    TcpServer* const tcp = &tcp_server_;
+    const bool no_can = options_.no_can;
+    const bool started = lidar_->start([this, can, tcp, no_can](const ScanFrame& frame) {
+        tcp->publish(frame);
+
         const DetectionResult result = perception_.process(frame);
 
         const bool obstacle =
@@ -96,11 +123,13 @@ bool Application::startLidar()
             result.right_center.obstacle_detected ||
             result.right.obstacle_detected;
 
-        CanMessage msg;
-        msg.id     = kBrakeCanId;
-        msg.dlc    = 1U;
-        msg.data[0] = obstacle ? kBrakeEngage : kBrakeDisengage;
-        can->send(msg);
+        if (!no_can) {
+            CanMessage msg;
+            msg.id      = kBrakeCanId;
+            msg.dlc     = 1U;
+            msg.data[0] = obstacle ? kBrakeEngage : kBrakeDisengage;
+            can->send(msg);
+        }
 
         std::cout << (obstacle ? "BRAKE  " : "clear  ")
                   << "pts=" << result.total_points
@@ -149,11 +178,14 @@ void Application::reportHealth()
 {
     const LidarStats lidar_stats = lidar_->stats();
 
+    const TcpServerStats tcp_stats = tcp_server_.stats();
+
     std::cout << "health: frames=" << lidar_stats.frames_delivered
               << " errors=" << lidar_stats.read_errors
               << " empty=" << lidar_stats.empty_frames
               << " connects=" << lidar_stats.connects
-              << " can=" << (can_bus_.isOpen() ? "open" : "closed");
+              << " can=" << (options_.no_can ? "disabled" : (can_bus_.isOpen() ? "open" : "closed"))
+              << " tcp_client=" << (tcp_stats.client_connected ? "connected" : "waiting");
 
     // Report the driver's own description only for errors that occurred since
     // the previous tick. Repeating a start-up timeout for the life of the
@@ -176,6 +208,7 @@ void Application::shutdown() noexcept
         lidar_->stop();
     }
     lidar_.reset();
+    tcp_server_.stop();
     can_bus_.close();
 }
 

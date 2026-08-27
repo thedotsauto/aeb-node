@@ -28,6 +28,7 @@
 #include "app/SignalWaiter.hpp"
 #include "canbus/CanBus.hpp"
 #include "lidar/Lidar.hpp"
+#include "network/TcpServer.hpp"
 #include "perception/Perception.hpp"
 
 namespace aeb::app {
@@ -66,9 +67,15 @@ public:
 private:
     /**
      * @brief Open the SocketCAN interface for braking output.
-     * @return @c true if the interface is open.
+     * @return @c true if the interface is open, or if CAN is disabled.
      */
     [[nodiscard]] bool startCanBus();
+
+    /**
+     * @brief Start the TCP visualisation server.
+     * @return @c true if the server is listening.
+     */
+    [[nodiscard]] bool startTcpServer();
 
     /**
      * @brief Create the lidar and begin acquisition.
@@ -94,6 +101,9 @@ private:
 
     /** @brief SocketCAN braking output. */
     CanBus can_bus_;
+
+    /** @brief TCP stream for the lidar_viewer (development only). */
+    TcpServer tcp_server_;
 
     /** @brief Acquisition driver; null until started. */
     std::unique_ptr<Lidar> lidar_;

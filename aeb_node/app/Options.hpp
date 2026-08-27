@@ -13,6 +13,7 @@
 
 #include "canbus/CanBus.hpp"
 #include "lidar/Lidar.hpp"
+#include "network/TcpServer.hpp"
 
 namespace aeb::app {
 
@@ -25,6 +26,12 @@ struct Options {
 
     /** @brief SocketCAN braking output settings. */
     CanBusConfig canbus{};
+
+    /** @brief When true, the CAN bus is not opened and no brake commands are sent. */
+    bool no_can{false};
+
+    /** @brief TCP visualisation server settings. */
+    TcpServerConfig tcp_server{};
 
     /** @brief Interval between health reports in seconds; 0 disables them. */
     unsigned health_interval_s{5U};

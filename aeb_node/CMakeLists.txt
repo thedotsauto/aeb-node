@@ -203,6 +203,22 @@ target_link_libraries(aeb_perception
     PUBLIC aeb_common)
 
 # ------------------------------------------------------------------------------
+# aeb_network - development TCP streaming server (visualisation only)
+#
+# Deliberately isolated: perception and braking must not link this target.
+# Only aeb_app links it so the safety path stays clean.
+# ------------------------------------------------------------------------------
+
+add_library(aeb_network STATIC
+    network/TcpServer.cpp
+    network/ClientSession.cpp
+    network/FrameQueue.cpp
+    network/ListenSocket.cpp)
+
+target_link_libraries(aeb_network
+    PUBLIC  aeb_common Threads::Threads)
+
+# ------------------------------------------------------------------------------
 # aeb_app - composition root
 # ------------------------------------------------------------------------------
 
@@ -212,7 +228,7 @@ add_library(aeb_app STATIC
     app/SignalWaiter.cpp)
 
 target_link_libraries(aeb_app
-    PUBLIC aeb_lidar aeb_perception aeb_canbus)
+    PUBLIC aeb_lidar aeb_perception aeb_canbus aeb_network)
 
 # ------------------------------------------------------------------------------
 # aeb_node - executable

@@ -58,6 +58,10 @@ constexpr unsigned long kMaxNumericValue = 0xFFFFFFFFUL;
         out.lidar.auto_reconnect = false;
         return true;
     }
+    if (arg == "--no-can") {
+        out.no_can = true;
+        return true;
+    }
     return false;
 }
 
@@ -92,6 +96,14 @@ constexpr unsigned long kMaxNumericValue = 0xFFFFFFFFUL;
             return false;
         }
         out.health_interval_s = seconds;
+        return true;
+    }
+    if (arg == "--tcp-port") {
+        std::uint32_t port = 0U;
+        if (!parseUnsigned(value, port, error, arg)) {
+            return false;
+        }
+        out.tcp_server.port = static_cast<std::uint16_t>(port);
         return true;
     }
 
@@ -138,7 +150,10 @@ void CommandLine::printUsage(const char* program)
               << "  --scan-timeout-ms MS    Per-revolution timeout (default 2000)\n"
               << "  --no-reconnect          Exit acquisition on device error\n\n"
               << "CAN bus:\n"
-              << "  --can-interface NAME    SocketCAN interface (default can0)\n\n"
+              << "  --can-interface NAME    SocketCAN interface (default can0)\n"
+              << "  --no-can                Disable CAN output (viewer-only mode)\n\n"
+              << "Visualisation:\n"
+              << "  --tcp-port PORT         TCP stream port for lidar_viewer (default 7000)\n\n"
               << "Diagnostics:\n"
               << "  --health-interval SEC   Health report period, 0 disables (default 5)\n"
               << "  -h, --help              Show this message\n";
