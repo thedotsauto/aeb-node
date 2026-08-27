@@ -135,6 +135,13 @@ fi
 # ---------------------------------------------------------------------------
 # 6. Launch both nodes
 # ---------------------------------------------------------------------------
+# Kill any stale instance that may still hold the TCP port.
+if pgrep -x aeb_node > /dev/null 2>&1; then
+    log "Stopping existing aeb_node process..."
+    pkill -x aeb_node || true
+    sleep 1
+fi
+
 log "Starting aeb_node (lidar → perception → CAN)..."
 AEB_ARGS=(--device "$LIDAR_DEVICE" --health-interval 5)
 if [[ "$SKIP_CAN" -eq 1 ]]; then
