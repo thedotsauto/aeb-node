@@ -215,6 +215,30 @@ def run_viewer(host: str, port: int, max_range_m: float) -> None:
                           transform=ax.transAxes, ha="center",
                           color="#aaaaaa", fontsize=9)
 
+    zoom_range = [max_range_m]   # mutable so closures can write it
+
+    def set_zoom(new_range: float) -> None:
+        new_range = max(0.5, min(new_range, 50.0))
+        zoom_range[0] = new_range
+        ax.set_ylim(0, new_range)
+        scatter.set_clim(0, new_range)
+        fig.canvas.draw_idle()
+
+    def on_scroll(event):
+        factor = 0.85 if event.button == "up" else 1.0 / 0.85
+        set_zoom(zoom_range[0] * factor)
+
+    def on_key(event):
+        if event.key in ("+", "="):
+            set_zoom(zoom_range[0] * 0.75)
+        elif event.key == "-":
+            set_zoom(zoom_range[0] / 0.75)
+        elif event.key == "r":
+            set_zoom(max_range_m)
+
+    fig.canvas.mpl_connect("scroll_event", on_scroll)
+    fig.canvas.mpl_connect("key_press_event", on_key)
+
     last_frame_idx = -1
 
     def update(_frame):
@@ -237,7 +261,8 @@ def run_viewer(host: str, port: int, max_range_m: float) -> None:
 
             status_text.set_text(
                 f"Frame #{count}   {len(points)} pts   "
-                f"max {dists.max():.2f} m   min {dists.min():.2f} m"
+                f"max {dists.max():.2f} m   min {dists.min():.2f} m   "
+                f"view {zoom_range[0]:.1f} m  (scroll or +/- to zoom, r=reset)"
             )
             status_text.set_color("#aaaaaa")
 
