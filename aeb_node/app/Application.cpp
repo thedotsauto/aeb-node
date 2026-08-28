@@ -37,6 +37,7 @@ Application::Application(Options options)
     : options_{std::move(options)}
     , can_bus_{options_.canbus}
     , tcp_server_{options_.tcp_server}
+    , perception_{options_.perception}
 {}
 
 Application::~Application()

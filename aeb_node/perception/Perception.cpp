@@ -25,6 +25,8 @@ DetectionResult Perception::process(const ScanFrame& frame)
         &result.right
     };
 
+    std::uint32_t sector_hits[5] = {0U, 0U, 0U, 0U, 0U};
+
     for (const auto& point : frame.points) {
         // Discard points with zero/negative distance as they are "no return" (invalid)
         if (point.distance_mm <= 0.0F) {
@@ -63,12 +65,18 @@ DetectionResult Perception::process(const ScanFrame& frame)
             sector_idx = 4;
         }
 
-        // Track nearest obstacle in this sector
+        // Track nearest point and hit count in this sector
         SectorResult& sector = *sectors[sector_idx];
-        if (!sector.obstacle_detected || point.distance_mm < sector.nearest_distance_mm) {
-            sector.obstacle_detected = true;
+        sector_hits[sector_idx]++;
+
+        if (point.distance_mm < sector.nearest_distance_mm || sector.nearest_distance_mm < 0.0F) {
             sector.nearest_distance_mm = point.distance_mm;
             sector.nearest_angle_deg = norm_angle;
+        }
+
+        // Only declare obstacle after enough hits (suppresses single-point noise)
+        if (sector_hits[sector_idx] >= config_.min_hits_per_sector) {
+            sector.obstacle_detected = true;
         }
     }
 

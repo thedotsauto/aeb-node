@@ -14,6 +14,7 @@
 #include "canbus/CanBus.hpp"
 #include "lidar/Lidar.hpp"
 #include "network/TcpServer.hpp"
+#include "perception/PerceptionConfig.hpp"
 
 namespace aeb::app {
 
@@ -32,6 +33,9 @@ struct Options {
 
     /** @brief TCP visualisation server settings. */
     TcpServerConfig tcp_server{};
+
+    /** @brief Obstacle detection thresholds. */
+    PerceptionConfig perception{};
 
     /** @brief Interval between health reports in seconds; 0 disables them. */
     unsigned health_interval_s{5U};

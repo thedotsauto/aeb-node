@@ -106,6 +106,33 @@ constexpr unsigned long kMaxNumericValue = 0xFFFFFFFFUL;
         out.tcp_server.port = static_cast<std::uint16_t>(port);
         return true;
     }
+    if (arg == "--min-angle") {
+        try { out.perception.min_angle_deg = std::stof(value); }
+        catch (...) { error = arg + ": '" + value + "' is not a valid float"; return false; }
+        return true;
+    }
+    if (arg == "--max-angle") {
+        try { out.perception.max_angle_deg = std::stof(value); }
+        catch (...) { error = arg + ": '" + value + "' is not a valid float"; return false; }
+        return true;
+    }
+    if (arg == "--max-distance") {
+        try { out.perception.max_distance_mm = std::stof(value); }
+        catch (...) { error = arg + ": '" + value + "' is not a valid float"; return false; }
+        return true;
+    }
+    if (arg == "--min-quality") {
+        std::uint32_t q = 0U;
+        if (!parseUnsigned(value, q, error, arg)) { return false; }
+        out.perception.minimum_quality = static_cast<std::uint8_t>(q);
+        return true;
+    }
+    if (arg == "--min-hits") {
+        std::uint32_t h = 0U;
+        if (!parseUnsigned(value, h, error, arg)) { return false; }
+        out.perception.min_hits_per_sector = h;
+        return true;
+    }
 
     error = "unknown option " + arg;
     return false;
@@ -154,6 +181,12 @@ void CommandLine::printUsage(const char* program)
               << "  --no-can                Disable CAN output (viewer-only mode)\n\n"
               << "Visualisation:\n"
               << "  --tcp-port PORT         TCP stream port for lidar_viewer (default 7000)\n\n"
+              << "Perception (AEB detection):\n"
+              << "  --min-angle DEG         FOV left  edge in degrees (default -45)\n"
+              << "  --max-angle DEG         FOV right edge in degrees (default  45)\n"
+              << "  --max-distance MM       Max range in millimetres   (default 2000)\n"
+              << "  --min-quality N         Min lidar quality 0-15+    (default 15)\n"
+              << "  --min-hits N            Min points per sector to declare obstacle (default 3)\n\n"
               << "Diagnostics:\n"
               << "  --health-interval SEC   Health report period, 0 disables (default 5)\n"
               << "  -h, --help              Show this message\n";

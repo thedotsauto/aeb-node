@@ -19,6 +19,15 @@ struct PerceptionConfig {
 
     /** @brief Points reported below this quality are ignored. */
     std::uint8_t minimum_quality = 15;
+
+    /**
+     * @brief Minimum number of quality-passing points that must fall inside a
+     * sector before it is declared as containing an obstacle.
+     *
+     * Raising this above 1 suppresses single-point false positives caused by
+     * vehicle body reflections or random noise returns.
+     */
+    std::uint32_t min_hits_per_sector = 3U;
 };
 
 }  // namespace aeb
