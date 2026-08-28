@@ -41,6 +41,9 @@ RPLIDAR_SDK_DIR="${RPLIDAR_SDK_DIR:-$HOME/rplidar_sdk}"
 CAN_INTERFACE="${CAN_INTERFACE:-can0}"
 CAN_BITRATE="${CAN_BITRATE:-500000}"
 LIDAR_DEVICE="${LIDAR_DEVICE:-/dev/ttyUSB0}"
+# Extra perception flags — set before running, e.g.:
+#   AEB_EXTRA_ARGS="--min-angle -30 --max-angle 30 --max-distance 1500 --min-hits 5" ./launch.sh
+AEB_EXTRA_ARGS="${AEB_EXTRA_ARGS:-}"
 
 # Parse flags
 SKIP_BUILD=0
@@ -149,6 +152,8 @@ if [[ "$SKIP_CAN" -eq 1 ]]; then
 else
     AEB_ARGS+=(--can-interface "$CAN_INTERFACE")
 fi
+# shellcheck disable=SC2206
+[[ -n "$AEB_EXTRA_ARGS" ]] && AEB_ARGS+=($AEB_EXTRA_ARGS)
 "$AEB_BIN" "${AEB_ARGS[@]}" &
 AEB_PID=$!
 
