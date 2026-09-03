@@ -28,15 +28,25 @@ struct CanBusConfig {
     /**
      * @brief Selects the UNO Q transport instead of SocketCAN.
      *
-     * When @c true, @ref CanBus::open and @ref CanBus::send use @ref fifo_path
-     * (a FIFO consumed by @c can_bridge.py) instead of a SocketCAN interface.
-     * The generated @ref CanMessage is unchanged; only the transport differs.
-     * Default is @c false so existing SocketCAN behaviour is untouched.
+     * When @c true, @ref CanBus::open and @ref CanBus::send connect to the
+     * App Lab can-bridge application's TCP server (127.0.0.1:39001, see
+     * @ref fifo_path) instead of a SocketCAN interface. The generated
+     * @ref CanMessage is unchanged; only the transport differs. Default is
+     * @c false so existing SocketCAN behaviour is untouched.
      */
     bool use_fifo_transport{false};
 
-    /** @brief FIFO path used when @ref use_fifo_transport is @c true. */
-    std::string fifo_path{"/tmp/aeb_can_fifo"};
+    /**
+     * @brief UNO Q transport endpoint, shown in start-up logging when
+     * @ref use_fifo_transport is @c true.
+     *
+     * @note The actual connection always targets 127.0.0.1:39001 (see
+     *       CanBus.cpp); this field is informational only. Its name and
+     *       type are kept from the earlier FIFO-based transport so that
+     *       existing call sites which set/read it by name (CommandLine.cpp,
+     *       Application.cpp) continue to compile unchanged.
+     */
+    std::string fifo_path{"127.0.0.1:39001"};
 };
 
 /**

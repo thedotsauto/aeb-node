@@ -3,14 +3,15 @@
 # Deploy target on the Arduino UNO Q board:
 #   ~/ArduinoApps/can-bridge/python/main.py
 #
-# Reads AEB CAN frames written by aeb_node (./launch.sh --unoq) to
-# /tmp/aeb_can_fifo and forwards each one to the STM32 MCU via the Arduino
-# UNO Q Bridge. Linux is the SENDER here: sketch/sketch.ino (unchanged)
-# registers Bridge.provide("can_frame", printCanFrame) on the MCU side, so
-# this file only calls Bridge.notify(...), never Bridge.provide("can_frame").
+# Runs a TCP server on 127.0.0.1:39001 that aeb_node (./launch.sh --unoq)
+# connects to, and forwards each received CAN frame to the STM32 MCU via
+# the Arduino UNO Q Bridge. Linux is the SENDER here: sketch/sketch.ino
+# (unchanged) registers Bridge.provide("can_frame", printCanFrame) on the
+# MCU side, so this file only calls Bridge.notify(...), never
+# Bridge.provide("can_frame").
 #
-# FIFO line format (written by aeb_node's CanBus, unchanged --
-# see aeb_node/canbus/CanBus.cpp): "<CAN_ID> <DLC> <BYTE0> ... <BYTE(DLC-1)>"
+# TCP payload format (written by aeb_node's CanBus, unchanged --
+# see aeb_node/canbus/CanBus.cpp): "<CAN_ID> <DLC> <BYTE0> ... <BYTE(DLC-1)>\n"
 #
 #   291 8 17 34 51 68 85 102 119 136
 #     CAN ID = 291 decimal = 0x123
@@ -20,24 +21,25 @@
 # The STM32 handler (sketch.ino, unchanged) has a fixed 10-parameter
 # signature (id, dlc, b0..b7), so the Bridge.notify call below always sends
 # exactly 8 data-byte parameters, zero-padded when DLC < 8. This padding is
-# only on the outbound Bridge call; it does not change the FIFO wire format,
+# only on the outbound Bridge call; it does not change the wire format,
 # CanMessage, DLC, or any AEB CAN generation logic.
+#
+# The TCP server runs in its own dedicated thread (not via
+# App.run(user_loop=...) polling): accept()/recv() block naturally, so
+# there is no FIFO, no os.mkfifo(), and no polling loop for IPC.
 
-import os
-import time
+import socket
+import threading
 
 from arduino.app_utils import App, Bridge
 
-FIFO_PATH = "/tmp/aeb_can_fifo"
+TCP_HOST = "127.0.0.1"
+TCP_PORT = 39001
 MAX_DATA_BYTES = 8
-_RETRY_DELAY_S = 0.05  # Avoid busy-spinning while the FIFO/writer isn't ready.
-
-_fifo_fd = None  # Raw non-blocking read fd for FIFO_PATH; None when closed.
-_recv_buffer = ""  # Bytes decoded so far that don't yet form a complete line.
 
 
 def _parse_frame(line: str):
-    """Parse one FIFO line into (can_id, dlc, [byte, ...]); None if invalid."""
+    """Parse one received line into (can_id, dlc, [byte, ...]); None if invalid."""
     parts = line.split()
     if len(parts) < 2:
         return None
@@ -83,61 +85,45 @@ def _forward(line: str) -> None:
         print(f"[CAN BRIDGE] failed to forward frame to STM32: {exc}")
 
 
-def _ensure_fifo_open() -> bool:
-    """Try to open FIFO_PATH as a raw non-blocking read fd.
+def _handle_connection(conn: socket.socket, addr) -> None:
+    print(f"[CAN BRIDGE] aeb_node connected from {addr[0]}:{addr[1]}")
+    buffer = ""
+    with conn:
+        while True:
+            try:
+                chunk = conn.recv(4096)
+            except OSError as exc:
+                print(f"[CAN BRIDGE] TCP recv error: {exc}")
+                return
 
-    launch.sh (--unoq) is responsible for creating the FIFO; this never
-    calls os.mkfifo(). Returns True once _fifo_fd is open. If the FIFO
-    does not exist yet, returns False so the caller retries on a later
-    loop iteration instead of blocking or crashing.
-    """
-    global _fifo_fd
-    try:
-        _fifo_fd = os.open(FIFO_PATH, os.O_RDONLY | os.O_NONBLOCK)
-    except OSError as exc:
-        print(f"[CAN BRIDGE] FIFO open failed: errno={exc.errno} error={exc}")
-        return False  # FIFO not created yet; retry later.
-    return True
+            if not chunk:
+                print("[CAN BRIDGE] aeb_node disconnected")
+                return
+
+            buffer += chunk.decode("utf-8", errors="replace")
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                print(f"[CAN BRIDGE] TCP RX: {line}")
+                _forward(line)
 
 
-def main_loop() -> None:
-    """One App Lab loop iteration: read available bytes and forward any
-    complete CAN frame lines they contain."""
-    global _fifo_fd, _recv_buffer
+def _serve_forever() -> None:
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((TCP_HOST, TCP_PORT))
+    server.listen(1)
+    print(f"[CAN BRIDGE] listening on {TCP_HOST}:{TCP_PORT}")
 
-    if _fifo_fd is None:
-        if not _ensure_fifo_open():
-            time.sleep(_RETRY_DELAY_S)
-            return
+    while True:
+        conn, addr = server.accept()
+        _handle_connection(conn, addr)
 
-    try:
-        chunk = os.read(_fifo_fd, 4096)
-    except BlockingIOError:
-        # Nothing available yet (no writer connected, or writer idle).
-        # Keep the fd open and retry later.
-        time.sleep(_RETRY_DELAY_S)
-        return
-    except OSError:
-        # Transient read error; not fatal. Retry on a later loop iteration.
-        time.sleep(_RETRY_DELAY_S)
-        return
 
-    if chunk == b"":
-        # Writer disconnected. Drop the fd and any partial line; the next
-        # iteration reopens the FIFO for the next writer.
-        os.close(_fifo_fd)
-        _fifo_fd = None
-        _recv_buffer = ""
-        return
-
-    _recv_buffer += chunk.decode("utf-8", errors="replace")
-
-    while "\n" in _recv_buffer:
-        line, _recv_buffer = _recv_buffer.split("\n", 1)
-        print(f"[CAN BRIDGE] FIFO RX: {line}")
-        _forward(line)
+def _start_server_thread() -> None:
+    thread = threading.Thread(target=_serve_forever, name="CanBridgeTcpServer", daemon=True)
+    thread.start()
 
 
 if __name__ == "__main__":
-    print(f"[CAN BRIDGE] watching {FIFO_PATH}")
-    App.run(user_loop=main_loop)
+    _start_server_thread()
+    App.run()
