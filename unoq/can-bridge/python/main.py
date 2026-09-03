@@ -32,7 +32,8 @@ FIFO_PATH = "/tmp/aeb_can_fifo"
 MAX_DATA_BYTES = 8
 _RETRY_DELAY_S = 0.05  # Avoid busy-spinning while the FIFO/writer isn't ready.
 
-_fifo = None  # Open file handle for FIFO_PATH, re-opened whenever it is None.
+_fifo_fd = None  # Raw non-blocking read fd for FIFO_PATH; None when closed.
+_recv_buffer = ""  # Bytes decoded so far that don't yet form a complete line.
 
 
 def _parse_frame(line: str):
@@ -83,46 +84,57 @@ def _forward(line: str) -> None:
 
 
 def _ensure_fifo_open() -> bool:
-    """Try to open FIFO_PATH for non-blocking reads.
+    """Try to open FIFO_PATH as a raw non-blocking read fd.
 
     launch.sh (--unoq) is responsible for creating the FIFO; this never
-    calls os.mkfifo(). Returns True once _fifo is open. If the FIFO does
-    not exist yet, returns False so the caller retries on a later loop
-    iteration instead of blocking or crashing.
+    calls os.mkfifo(). Returns True once _fifo_fd is open. If the FIFO
+    does not exist yet, returns False so the caller retries on a later
+    loop iteration instead of blocking or crashing.
     """
-    global _fifo
+    global _fifo_fd
     try:
-        fd = os.open(FIFO_PATH, os.O_RDONLY | os.O_NONBLOCK)
+        _fifo_fd = os.open(FIFO_PATH, os.O_RDONLY | os.O_NONBLOCK)
     except OSError:
         return False  # FIFO not created yet; retry later.
-    _fifo = os.fdopen(fd, "r")
     return True
 
 
 def main_loop() -> None:
-    """One App Lab loop iteration: read and forward a single CAN frame."""
-    global _fifo
+    """One App Lab loop iteration: read available bytes and forward any
+    complete CAN frame lines they contain."""
+    global _fifo_fd, _recv_buffer
 
-    if _fifo is None:
+    if _fifo_fd is None:
         if not _ensure_fifo_open():
             time.sleep(_RETRY_DELAY_S)
             return
 
     try:
-        line = _fifo.readline()
-    except OSError:
-        # No writer connected right now, or a transient read error; not
-        # fatal. Retry on a later loop iteration.
-        time.sleep(_RETRY_DELAY_S)
-        return
-
-    if not line:
+        chunk = os.read(_fifo_fd, 4096)
+    except BlockingIOError:
         # Nothing available yet (no writer connected, or writer idle).
-        # Keep the handle open and retry later.
+        # Keep the fd open and retry later.
+        time.sleep(_RETRY_DELAY_S)
+        return
+    except OSError:
+        # Transient read error; not fatal. Retry on a later loop iteration.
         time.sleep(_RETRY_DELAY_S)
         return
 
-    _forward(line)
+    if chunk == b"":
+        # Writer disconnected. Drop the fd and any partial line; the next
+        # iteration reopens the FIFO for the next writer.
+        os.close(_fifo_fd)
+        _fifo_fd = None
+        _recv_buffer = ""
+        return
+
+    _recv_buffer += chunk.decode("utf-8", errors="replace")
+
+    while "\n" in _recv_buffer:
+        line, _recv_buffer = _recv_buffer.split("\n", 1)
+        print(f"[CAN BRIDGE] FIFO RX: {line}")
+        _forward(line)
 
 
 if __name__ == "__main__":
