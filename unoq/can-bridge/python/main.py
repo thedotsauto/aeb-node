@@ -94,7 +94,8 @@ def _ensure_fifo_open() -> bool:
     global _fifo_fd
     try:
         _fifo_fd = os.open(FIFO_PATH, os.O_RDONLY | os.O_NONBLOCK)
-    except OSError:
+    except OSError as exc:
+        print(f"[CAN BRIDGE] FIFO open failed: errno={exc.errno} error={exc}")
         return False  # FIFO not created yet; retry later.
     return True
 
