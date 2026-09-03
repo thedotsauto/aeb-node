@@ -24,11 +24,13 @@
 # CanMessage, DLC, or any AEB CAN generation logic.
 
 import os
+import time
 
 from arduino.app_utils import App, Bridge
 
 FIFO_PATH = "/tmp/aeb_can_fifo"
 MAX_DATA_BYTES = 8
+_RETRY_DELAY_S = 0.05  # Avoid busy-spinning while the FIFO/writer isn't ready.
 
 _fifo = None  # Open file handle for FIFO_PATH, re-opened whenever it is None.
 
@@ -80,15 +82,21 @@ def _forward(line: str) -> None:
         print(f"[CAN BRIDGE] failed to forward frame to STM32: {exc}")
 
 
-def _ensure_fifo_open():
-    """(Re)open FIFO_PATH for reading, blocking until aeb_node attaches."""
+def _ensure_fifo_open() -> bool:
+    """Try to open FIFO_PATH for non-blocking reads.
+
+    launch.sh (--unoq) is responsible for creating the FIFO; this never
+    calls os.mkfifo(). Returns True once _fifo is open. If the FIFO does
+    not exist yet, returns False so the caller retries on a later loop
+    iteration instead of blocking or crashing.
+    """
     global _fifo
-    if not os.path.exists(FIFO_PATH):
-        os.mkfifo(FIFO_PATH)
-    # A blocking open() for read on a FIFO waits for a writer (aeb_node) to
-    # attach; this is the expected, non-crashing way to handle "no writer
-    # connected yet".
-    _fifo = open(FIFO_PATH, "r")
+    try:
+        fd = os.open(FIFO_PATH, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError:
+        return False  # FIFO not created yet; retry later.
+    _fifo = os.fdopen(fd, "r")
+    return True
 
 
 def main_loop() -> None:
@@ -96,13 +104,22 @@ def main_loop() -> None:
     global _fifo
 
     if _fifo is None:
-        _ensure_fifo_open()
+        if not _ensure_fifo_open():
+            time.sleep(_RETRY_DELAY_S)
+            return
 
-    line = _fifo.readline()
-    if line == "":
-        # Writer (aeb_node) closed the FIFO; reopen and wait for the next one.
-        _fifo.close()
-        _fifo = None
+    try:
+        line = _fifo.readline()
+    except OSError:
+        # No writer connected right now, or a transient read error; not
+        # fatal. Retry on a later loop iteration.
+        time.sleep(_RETRY_DELAY_S)
+        return
+
+    if not line:
+        # Nothing available yet (no writer connected, or writer idle).
+        # Keep the handle open and retry later.
+        time.sleep(_RETRY_DELAY_S)
         return
 
     _forward(line)
