@@ -16,10 +16,14 @@
 #   ./launch.sh --no-build          # skip cmake + pip (after first build)
 #   ./launch.sh --no-can            # viewer-only, no MCP2515 HAT needed
 #   ./launch.sh --no-build --no-can # fast viewer-only start
+#   ./launch.sh --unoq              # UNO Q mode: CAN frames -> FIFO -> can_bridge.py
+#                                    # -> Arduino UNO Q Bridge -> STM32 (prints frame).
+#                                    # Skips can0 entirely; MCP2515 is not used.
 #
 # Override defaults via environment variables before running:
 #   RPLIDAR_SDK_DIR=/path/to/rplidar_sdk ./launch.sh
 #   CAN_INTERFACE=can1 CAN_BITRATE=250000 ./launch.sh
+#   CAN_FIFO=/tmp/aeb_can_fifo ./launch.sh --unoq
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
@@ -41,6 +45,8 @@ RPLIDAR_SDK_DIR="${RPLIDAR_SDK_DIR:-$HOME/rplidar_sdk}"
 CAN_INTERFACE="${CAN_INTERFACE:-can0}"
 CAN_BITRATE="${CAN_BITRATE:-500000}"
 LIDAR_DEVICE="${LIDAR_DEVICE:-/dev/ttyUSB0}"
+# UNO Q mode only: FIFO used to hand CAN frames to can_bridge.py.
+CAN_FIFO="${CAN_FIFO:-/tmp/aeb_can_fifo}"
 # Extra perception flags — set before running, e.g.:
 #   AEB_EXTRA_ARGS="--min-angle -30 --max-angle 30 --max-distance 1500 --min-hits 5" ./launch.sh
 AEB_EXTRA_ARGS="${AEB_EXTRA_ARGS:-}"
@@ -49,11 +55,13 @@ AEB_EXTRA_ARGS="${AEB_EXTRA_ARGS:-}"
 SKIP_BUILD=0
 SKIP_TOF=0
 SKIP_CAN=0
+UNOQ_MODE=0
 for arg in "$@"; do
     case "$arg" in
         --no-build) SKIP_BUILD=1 ;;
         --no-tof)   SKIP_TOF=1 ;;
         --no-can)   SKIP_CAN=1 ;;
+        --unoq)     UNOQ_MODE=1 ;;
         *) die "Unknown argument: $arg" ;;
     esac
 done
@@ -61,7 +69,9 @@ done
 # ---------------------------------------------------------------------------
 # 1. SocketCAN interface setup
 # ---------------------------------------------------------------------------
-if [[ "$SKIP_CAN" -eq 1 ]]; then
+if [[ "$UNOQ_MODE" -eq 1 ]]; then
+    log "UNO Q mode (--unoq): skipping SocketCAN setup, can0 is not used."
+elif [[ "$SKIP_CAN" -eq 1 ]]; then
     log "CAN disabled (--no-can), skipping interface setup."
 else
     log "Bringing up $CAN_INTERFACE at $CAN_BITRATE bps..."
@@ -145,9 +155,26 @@ if pgrep -x aeb_node > /dev/null 2>&1; then
     sleep 1
 fi
 
+BRIDGE_PID=""
+if [[ "$UNOQ_MODE" -eq 1 ]]; then
+    log "UNO Q mode: preparing FIFO $CAN_FIFO ..."
+    rm -f "$CAN_FIFO"
+    mkfifo "$CAN_FIFO" || die "Could not create FIFO $CAN_FIFO"
+
+    log "Starting can_bridge.py (FIFO -> Arduino UNO Q Bridge -> STM32)..."
+    "$TOF_PYTHON" "$REPO_DIR/can_bridge.py" --fifo "$CAN_FIFO" &
+    BRIDGE_PID=$!
+    # Give can_bridge.py time to open the FIFO for reading before aeb_node
+    # opens it for writing (the write side is non-blocking and fails
+    # immediately if no reader is present yet).
+    sleep 1
+fi
+
 log "Starting aeb_node (lidar → perception → CAN)..."
 AEB_ARGS=(--device "$LIDAR_DEVICE" --health-interval 5)
-if [[ "$SKIP_CAN" -eq 1 ]]; then
+if [[ "$UNOQ_MODE" -eq 1 ]]; then
+    AEB_ARGS+=(--unoq)
+elif [[ "$SKIP_CAN" -eq 1 ]]; then
     AEB_ARGS+=(--no-can)
 else
     AEB_ARGS+=(--can-interface "$CAN_INTERFACE")
@@ -174,9 +201,11 @@ log "Press Ctrl-C to stop."
 # ---------------------------------------------------------------------------
 cleanup() {
     log "Shutting down..."
-    kill "$AEB_PID" ${TOF_PID:+"$TOF_PID"} 2>/dev/null || true
-    wait "$AEB_PID" ${TOF_PID:+"$TOF_PID"} 2>/dev/null || true
-    if [[ "$SKIP_CAN" -eq 0 ]]; then
+    kill "$AEB_PID" ${TOF_PID:+"$TOF_PID"} ${BRIDGE_PID:+"$BRIDGE_PID"} 2>/dev/null || true
+    wait "$AEB_PID" ${TOF_PID:+"$TOF_PID"} ${BRIDGE_PID:+"$BRIDGE_PID"} 2>/dev/null || true
+    if [[ "$UNOQ_MODE" -eq 1 ]]; then
+        rm -f "$CAN_FIFO"
+    elif [[ "$SKIP_CAN" -eq 0 ]]; then
         sudo ip link set "$CAN_INTERFACE" down 2>/dev/null || true
     fi
     log "Done."
@@ -185,7 +214,7 @@ trap cleanup INT TERM
 
 # Wait for either process to exit (crash or signal)
 # shellcheck disable=SC2086
-wait -n "$AEB_PID" ${TOF_PID:+"$TOF_PID"} 2>/dev/null || true
+wait -n "$AEB_PID" ${TOF_PID:+"$TOF_PID"} ${BRIDGE_PID:+"$BRIDGE_PID"} 2>/dev/null || true
 
 # If one exited (e.g. crashed), kill the other
 cleanup

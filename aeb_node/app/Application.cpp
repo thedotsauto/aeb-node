@@ -86,7 +86,11 @@ bool Application::startCanBus()
         return false;
     }
 
-    std::cout << "aeb_node: CAN interface " << options_.canbus.interface << " open\n";
+    if (options_.canbus.use_fifo_transport) {
+        std::cout << "aeb_node: UNO Q CAN transport open (" << options_.canbus.fifo_path << ")\n";
+    } else {
+        std::cout << "aeb_node: CAN interface " << options_.canbus.interface << " open\n";
+    }
     return true;
 }
 

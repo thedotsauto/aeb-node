@@ -6,9 +6,11 @@
 #include "canbus/CanBus.hpp"
 
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <string>
 
+#include <fcntl.h>
 #include <linux/can.h>
 #include <linux/can/raw.h>
 #include <net/if.h>
@@ -43,6 +45,22 @@ bool CanBus::open()
     if (fd_ >= 0) {
         last_error_ = "already open";
         return false;
+    }
+
+    if (config_.use_fifo_transport) {
+        // UNO Q mode: the AEB CAN logic is unchanged; only the transport is a
+        // FIFO consumed by can_bridge.py instead of a SocketCAN interface.
+        // O_NONBLOCK so a missing reader is reported immediately (ENXIO)
+        // rather than hanging aeb_node start-up.
+        fd_ = ::open(config_.fifo_path.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd_ < 0) {
+            last_error_ = describeErrno("open(" + config_.fifo_path +
+                                        ") - is can_bridge.py running?");
+            fd_ = -1;
+            return false;
+        }
+        last_error_.clear();
+        return true;
     }
 
     fd_ = ::socket(PF_CAN, SOCK_RAW, CAN_RAW);
@@ -95,6 +113,26 @@ bool CanBus::send(const CanMessage& msg) noexcept
 {
     if (fd_ < 0) {
         return false;
+    }
+
+    if (config_.use_fifo_transport) {
+        // Deterministic text format for can_bridge.py: "<id> <dlc> <byte>...".
+        // Only the valid (dlc) bytes are serialised; the CanMessage generated
+        // by the existing AEB logic is otherwise untouched.
+        char line[64];
+        const std::uint8_t bytes = (msg.dlc <= kCanMaxDlc) ? msg.dlc : kCanMaxDlc;
+        int len = std::snprintf(line, sizeof(line), "%u %u", msg.id, static_cast<unsigned>(bytes));
+        for (std::uint8_t i = 0U; len > 0 && static_cast<std::size_t>(len) < sizeof(line) && i < bytes; ++i) {
+            len += std::snprintf(line + len, sizeof(line) - static_cast<std::size_t>(len), " %u",
+                                 static_cast<unsigned>(msg.data[i]));
+        }
+        if (len <= 0 || static_cast<std::size_t>(len) >= sizeof(line) - 1U) {
+            return false;  // Malformed or would overflow the line buffer.
+        }
+        line[len++] = '\n';
+
+        const ssize_t sent = ::write(fd_, line, static_cast<std::size_t>(len));
+        return sent == static_cast<ssize_t>(len);
     }
 
     struct can_frame frame{};

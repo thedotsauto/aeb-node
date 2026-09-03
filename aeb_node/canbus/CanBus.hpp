@@ -24,6 +24,19 @@ namespace aeb {
 struct CanBusConfig {
     /** @brief SocketCAN interface name (e.g. @c "can0"). */
     std::string interface{"can0"};
+
+    /**
+     * @brief Selects the UNO Q transport instead of SocketCAN.
+     *
+     * When @c true, @ref CanBus::open and @ref CanBus::send use @ref fifo_path
+     * (a FIFO consumed by @c can_bridge.py) instead of a SocketCAN interface.
+     * The generated @ref CanMessage is unchanged; only the transport differs.
+     * Default is @c false so existing SocketCAN behaviour is untouched.
+     */
+    bool use_fifo_transport{false};
+
+    /** @brief FIFO path used when @ref use_fifo_transport is @c true. */
+    std::string fifo_path{"/tmp/aeb_can_fifo"};
 };
 
 /**

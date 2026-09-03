@@ -62,6 +62,12 @@ constexpr unsigned long kMaxNumericValue = 0xFFFFFFFFUL;
         out.no_can = true;
         return true;
     }
+    if (arg == "--unoq") {
+        // UNO Q mode: CAN frames still generated normally, but CanBus
+        // transports them over a FIFO to can_bridge.py instead of SocketCAN.
+        out.canbus.use_fifo_transport = true;
+        return true;
+    }
     return false;
 }
 
@@ -178,7 +184,9 @@ void CommandLine::printUsage(const char* program)
               << "  --no-reconnect          Exit acquisition on device error\n\n"
               << "CAN bus:\n"
               << "  --can-interface NAME    SocketCAN interface (default can0)\n"
-              << "  --no-can                Disable CAN output (viewer-only mode)\n\n"
+              << "  --no-can                Disable CAN output (viewer-only mode)\n"
+              << "  --unoq                  Send CAN frames via FIFO to can_bridge.py "
+                 "instead of SocketCAN\n\n"
               << "Visualisation:\n"
               << "  --tcp-port PORT         TCP stream port for lidar_viewer (default 7000)\n\n"
               << "Perception (AEB detection):\n"
