@@ -16,9 +16,11 @@
 #   ./launch.sh --no-build          # skip cmake + pip (after first build)
 #   ./launch.sh --no-can            # viewer-only, no MCP2515 HAT needed
 #   ./launch.sh --no-build --no-can # fast viewer-only start
-#   ./launch.sh --unoq              # UNO Q mode: CAN frames -> FIFO -> can_bridge.py
-#                                    # -> Arduino UNO Q Bridge -> STM32 (prints frame).
-#                                    # Skips can0 entirely; MCP2515 is not used.
+#   ./launch.sh --unoq              # UNO Q mode: CAN frames -> FIFO -> App Lab
+#                                    # "can-bridge" app -> Arduino UNO Q Bridge -> STM32
+#                                    # (prints frame). Start that App Lab app separately;
+#                                    # this script only checks for it. can0 and MCP2515
+#                                    # are not used.
 #
 # Override defaults via environment variables before running:
 #   RPLIDAR_SDK_DIR=/path/to/rplidar_sdk ./launch.sh
@@ -45,7 +47,7 @@ RPLIDAR_SDK_DIR="${RPLIDAR_SDK_DIR:-$HOME/rplidar_sdk}"
 CAN_INTERFACE="${CAN_INTERFACE:-can0}"
 CAN_BITRATE="${CAN_BITRATE:-500000}"
 LIDAR_DEVICE="${LIDAR_DEVICE:-/dev/ttyUSB0}"
-# UNO Q mode only: FIFO used to hand CAN frames to can_bridge.py.
+# UNO Q mode only: FIFO used to hand CAN frames to the App Lab can-bridge app.
 CAN_FIFO="${CAN_FIFO:-/tmp/aeb_can_fifo}"
 # Extra perception flags — set before running, e.g.:
 #   AEB_EXTRA_ARGS="--min-angle -30 --max-angle 30 --max-distance 1500 --min-hits 5" ./launch.sh
@@ -155,19 +157,23 @@ if pgrep -x aeb_node > /dev/null 2>&1; then
     sleep 1
 fi
 
-BRIDGE_PID=""
 if [[ "$UNOQ_MODE" -eq 1 ]]; then
     log "UNO Q mode: preparing FIFO $CAN_FIFO ..."
     rm -f "$CAN_FIFO"
     mkfifo "$CAN_FIFO" || die "Could not create FIFO $CAN_FIFO"
 
-    log "Starting can_bridge.py (FIFO -> Arduino UNO Q Bridge -> STM32)..."
-    "$TOF_PYTHON" "$REPO_DIR/can_bridge.py" --fifo "$CAN_FIFO" &
-    BRIDGE_PID=$!
-    # Give can_bridge.py time to open the FIFO for reading before aeb_node
-    # opens it for writing (the write side is non-blocking and fails
-    # immediately if no reader is present yet).
-    sleep 1
+    # The Arduino UNO Q Bridge relay (FIFO -> STM32) is provided by the App
+    # Lab "can-bridge" application (~/ArduinoApps/can-bridge), which must
+    # already be running — this script does not launch it. We only check
+    # for the router socket the Bridge connects through; we do not start
+    # anything with system python3.
+    ARDUINO_ROUTER_SOCK="${ARDUINO_ROUTER_SOCK:-/var/run/arduino-router.sock}"
+    if [[ -S "$ARDUINO_ROUTER_SOCK" ]]; then
+        log "Arduino UNO Q router socket found at $ARDUINO_ROUTER_SOCK."
+    else
+        err "Arduino UNO Q router socket not found at $ARDUINO_ROUTER_SOCK."
+        err "Start the App Lab 'can-bridge' application first (it reads $CAN_FIFO and relays to the STM32)."
+    fi
 fi
 
 log "Starting aeb_node (lidar → perception → CAN)..."
@@ -201,8 +207,8 @@ log "Press Ctrl-C to stop."
 # ---------------------------------------------------------------------------
 cleanup() {
     log "Shutting down..."
-    kill "$AEB_PID" ${TOF_PID:+"$TOF_PID"} ${BRIDGE_PID:+"$BRIDGE_PID"} 2>/dev/null || true
-    wait "$AEB_PID" ${TOF_PID:+"$TOF_PID"} ${BRIDGE_PID:+"$BRIDGE_PID"} 2>/dev/null || true
+    kill "$AEB_PID" ${TOF_PID:+"$TOF_PID"} 2>/dev/null || true
+    wait "$AEB_PID" ${TOF_PID:+"$TOF_PID"} 2>/dev/null || true
     if [[ "$UNOQ_MODE" -eq 1 ]]; then
         rm -f "$CAN_FIFO"
     elif [[ "$SKIP_CAN" -eq 0 ]]; then
@@ -214,7 +220,7 @@ trap cleanup INT TERM
 
 # Wait for either process to exit (crash or signal)
 # shellcheck disable=SC2086
-wait -n "$AEB_PID" ${TOF_PID:+"$TOF_PID"} ${BRIDGE_PID:+"$BRIDGE_PID"} 2>/dev/null || true
+wait -n "$AEB_PID" ${TOF_PID:+"$TOF_PID"} 2>/dev/null || true
 
 # If one exited (e.g. crashed), kill the other
 cleanup
